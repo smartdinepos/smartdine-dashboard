@@ -41,7 +41,6 @@ function percentToPixels (naturalW, naturalH, areaPercent) {
   };
 }
 
-// Upload one file with selected variants + coordinates
 async function uploadFileWithVariants ({
   restaurantId,
   menuItemId,
