@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchCategoryGroups, createCategoryGroup, updateCategoryGroup } from '../api/categroup';
+import { fetchCategoryGroups, createCategoryGroup, updateCategoryGroup, deleteCategoryGroup } from '../api/categroup';
 
 export function useCategoryGroups (restaurantId) {
   return useQuery({
@@ -29,6 +29,18 @@ export function useUpdateCategoryGroup () {
     mutationFn: ({ restaurantId, categoryGroupId, data }) => updateCategoryGroup(restaurantId, categoryGroupId, data),
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries(['categoryGroups', variables.restaurantId]);
+    }
+  });
+}
+
+export function useDeleteCategoryGroup () {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ restaurantId, categoryGroupId }) => deleteCategoryGroup(restaurantId, categoryGroupId),
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries(['categoryGroups', variables.restaurantId]);
+      queryClient.invalidateQueries(['categories', variables.restaurantId]);
     }
   });
 }

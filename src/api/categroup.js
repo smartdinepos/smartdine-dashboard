@@ -14,3 +14,8 @@ export async function updateCategoryGroup (restaurantId, categoryGroupId, data) 
   const res = await api.patch(`/restaurants/${restaurantId}/category-groups/${categoryGroupId}`, data);
   return res.data;
 }
+
+export async function deleteCategoryGroup (restaurantId, categoryGroupId) {
+  const res = await api.delete(`/restaurants/${restaurantId}/category-groups/${categoryGroupId}`);
+  return res.data;
+}

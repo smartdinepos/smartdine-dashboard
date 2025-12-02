@@ -10,9 +10,13 @@ import {
   Space,
   Typography,
   Row,
-  Col
+  Col,
+  Checkbox,
+  Tag
 } from 'antd';
 import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
+import { useParams } from 'react-router-dom';
+import { useCategories } from '../../../hooks/useCategories';
 
 const { Text } = Typography;
 const { Option } = Select;
@@ -23,40 +27,70 @@ const TRIGGER_EVENTS = [
   'WHILE_CATEGORY_GROUP_ACTIVE'
 ];
 
+const normalizeId = (value) => (value === undefined || value === null ? '' : String(value));
+
+const getCategoryGroupId = cat => {
+  if (!cat) return null;
+  return (
+    cat.categoryGroupId ||
+    cat.categoryGroupID ||
+    cat.categoryGroup?._id ||
+    cat.categoryGroup?.id ||
+    null
+  );
+};
+
 const getGroupId = g => {
   if (!g) return null;
   return g._id || g.id || g.categoryGroupId || g.categoryGroupID || null;
 };
 
-export default function CategoryGroupEditModal ({
+export default function CategoryGroupEditModal({
   open,
   group,
   allGroups = [],
+  isCreating = false,
   saving,
   onCancel,
   onSave
 }) {
   const [form] = Form.useForm();
+  const { rid } = useParams();
+  const { data: categories } = useCategories(rid);
 
   useEffect(() => {
-    if (open && group) {
+    if (open && group && !isCreating && getGroupId(group)) {
+      const currentGroupId = normalizeId(getGroupId(group));
+
+      // Get category IDs that belong to this group
+      const groupCategoryIds = (categories || [])
+        .filter(cat => normalizeId(getCategoryGroupId(cat)) === currentGroupId)
+        .map(cat => cat._id || cat.id);
+
       form.setFieldsValue({
         name: group.name,
         isCurrentCategoryGroupEligible: group.isCurrentCategoryGroupEligible,
         maxItemsPerGuest: group.maxItemsPerGuest,
+        categoryIds: groupCategoryIds,
         linkedCategoryGroups: group.linkedCategoryGroups || []
       });
     } else {
-      form.resetFields();
+      form.setFieldsValue({
+        name: undefined,
+        isCurrentCategoryGroupEligible: true,
+        maxItemsPerGuest: undefined,
+        categoryIds: [],
+        linkedCategoryGroups: []
+      });
     }
-  }, [open, group, form]);
+  }, [open, group, form, categories, isCreating]);
 
   const handleOk = async () => {
     try {
       const values = await form.validateFields();
 
       onSave({
-        id: getGroupId(group), // optional: include id for update API
+        id: getGroupId(group),
         ...values,
         linkedCategoryGroups: values.linkedCategoryGroups || []
       });
@@ -65,8 +99,6 @@ export default function CategoryGroupEditModal ({
     }
   };
 
-  // ✅ include ALL groups (including the current one),
-  // so "Starters" appears and existing self-links show the name.
   const targetGroupOptions = (allGroups || [])
     .map(g => ({
       __id: getGroupId(g),
@@ -76,12 +108,12 @@ export default function CategoryGroupEditModal ({
 
   return (
     <Modal
-      title='Edit Category Group'
+      title={isCreating ? 'Create New Category Group' : 'Edit Category Group'}
       open={open}
       onOk={handleOk}
       onCancel={onCancel}
       confirmLoading={saving}
-      width={700}
+      width={900}
       destroyOnClose
     >
       <Form
@@ -89,6 +121,7 @@ export default function CategoryGroupEditModal ({
         layout='vertical'
         initialValues={{
           isCurrentCategoryGroupEligible: true,
+          categoryIds: [],
           linkedCategoryGroups: []
         }}
       >
@@ -118,6 +151,23 @@ export default function CategoryGroupEditModal ({
         </Row>
 
         <Form.Item
+          name='categoryIds'
+          label='Categories'
+        >
+          <Checkbox.Group style={{ width: '100%' }}>
+            <Space wrap>
+              {(categories || []).map((cat) => (
+                <Checkbox key={cat._id || cat.id} value={cat._id || cat.id}>
+                  <Tag color='cyan' style={{ margin: 0 }}>
+                    {cat.name}
+                  </Tag>
+                </Checkbox>
+              ))}
+            </Space>
+          </Checkbox.Group>
+        </Form.Item>
+
+        <Form.Item
           name='isCurrentCategoryGroupEligible'
           valuePropName='checked'
           label='Eligible for Promotions'
@@ -145,7 +195,7 @@ export default function CategoryGroupEditModal ({
                     {...restField}
                     name={[name, 'triggerEvent']}
                     rules={[{ required: true, message: 'Missing trigger' }]}
-                    style={{ width: 200 }}
+                    style={{ width: 300 }}
                   >
                     <Select placeholder='Trigger Event'>
                       {TRIGGER_EVENTS.map(ev => (
