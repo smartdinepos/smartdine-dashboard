@@ -3,18 +3,21 @@ import { useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getAllMenuItemsByRestaurant, updateMenuItem } from '../api/menuItems';
 
+const normalizeId = (value) => (value === undefined || value === null ? '' : String(value));
+
 export function useMenuItems (restaurantId, filters = {}) {
   const stableFilterKey = useMemo(
     () => JSON.stringify(filters || {}),
     [filters]
   );
+  const baseKey = useMemo(() => ['menu-items-all', restaurantId], [restaurantId]);
   const normalizedFilters = useMemo(
     () => (filters && typeof filters === 'object' ? filters : {}),
     [stableFilterKey]
   );
 
   return useQuery({
-    queryKey: ['menu-items-all', restaurantId, stableFilterKey],
+    queryKey: [...baseKey, stableFilterKey],
     queryFn: () => getAllMenuItemsByRestaurant(restaurantId, normalizedFilters),
     enabled: !!restaurantId,
     staleTime: 60_000,
@@ -24,16 +27,17 @@ export function useMenuItems (restaurantId, filters = {}) {
 
 export function useUpdateMenuItem (restaurantId) {
   const qc = useQueryClient();
+  const baseKey = useMemo(() => ['menu-items-all', restaurantId], [restaurantId]);
 
   return useMutation({
     mutationFn: ({ itemId, data }) => updateMenuItem(restaurantId, itemId, data),
 
     async onMutate ({ itemId, data }) {
-      await qc.cancelQueries({ queryKey: ['menu-items-all', restaurantId] });
-      const previous = qc.getQueryData(['menu-items-all', restaurantId]);
+      await qc.cancelQueries({ queryKey: baseKey });
+      const previous = qc.getQueriesData({ queryKey: baseKey });
 
-      if (data && (data.description != null || data.name != null || data.comboItems != null || data.combos != null)) {
-        qc.setQueryData(['menu-items-all', restaurantId], (old) => {
+      if (data && (data.description != null || data.name != null || data.comboItems != null || data.combos != null || data.categoryId != null || data.category != null)) {
+        qc.setQueriesData({ queryKey: baseKey }, (old) => {
           if (!old?.items) return old;
           const comboItems =
             data.comboItems ??
@@ -44,7 +48,7 @@ export function useUpdateMenuItem (restaurantId) {
           return {
             ...old,
             items: old.items.map((it) => {
-              if (it._id !== itemId) return it;
+              if (normalizeId(it._id) !== normalizeId(itemId)) return it;
               return {
                 ...it,
                 ...data,
@@ -58,22 +62,26 @@ export function useUpdateMenuItem (restaurantId) {
     },
 
     onError (_err, _vars, ctx) {
-      if (ctx?.previous) qc.setQueryData(['menu-items-all', restaurantId], ctx.previous);
+      if (ctx?.previous) {
+        ctx.previous.forEach(([key, data]) => {
+          qc.setQueryData(key, data);
+        });
+      }
     },
 
     onSuccess (updated) {
       if (!updated?._id) return;
-      qc.setQueryData(['menu-items-all', restaurantId], (old) => {
+      qc.setQueriesData({ queryKey: baseKey }, (old) => {
         if (!old?.items) return old;
         return {
           ...old,
-          items: old.items.map(it => (it._id === updated._id ? { ...it, ...updated } : it))
+          items: old.items.map(it => (normalizeId(it._id) === normalizeId(updated._id) ? { ...it, ...updated } : it))
         };
       });
     },
 
     onSettled () {
-      qc.invalidateQueries({ queryKey: ['menu-items-all', restaurantId] });
+      qc.invalidateQueries({ queryKey: baseKey });
     }
   });
 }

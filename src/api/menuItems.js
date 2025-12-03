@@ -45,7 +45,16 @@ const normalizeItem = (x = {}) => {
   else if (Array.isArray(x.photos)) images = x.photos.map(u => typeof u === 'string' ? u : (u?.url ?? ''));
   images = images.filter(Boolean);
 
-  const category = x.categoryName ?? x.category ?? null;
+  const categorySource = x.category ?? x.categoryName ?? null;
+  const categoryId =
+    x.categoryId ??
+    x.category_id ??
+    (typeof categorySource === 'object' ? (categorySource?._id || categorySource?.id) : null) ??
+    null;
+  const category =
+    x.categoryName ??
+    (typeof categorySource === 'string' ? categorySource : categorySource?.name) ??
+    null;
   const menuName = x.menuName ?? null;
   const posCategoryId = x.posCategoryId ?? null;
   const posItemId = x.posItemId ?? null;
@@ -70,6 +79,7 @@ const normalizeItem = (x = {}) => {
     price,
     tags: [...tags, ...(veg ? [veg] : []), ...(bestseller ? [bestseller] : [])],
     images,
+    categoryId,
     category,
     menuName,
     posCategoryId,

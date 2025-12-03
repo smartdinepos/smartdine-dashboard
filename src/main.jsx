@@ -12,6 +12,8 @@ import BillingPage from './Components/restaurant/section/BillingPage.jsx';
 import SettingsPage from './Components/restaurant/section/SettingsPage.jsx';
 import HelpPage from './Components/restaurant/section/HelpPage.jsx';
 import CategoryGroups from './Components/restaurant/section/CategoryGroups.jsx';
+import CategoriesPage from './Components/restaurant/section/CategoriesPage.jsx';
+import CategoryEditPage from './Components/restaurant/section/CategoryEditPage.jsx';
 import 'antd/dist/reset.css';
 import './index.css';
 
@@ -24,6 +26,8 @@ const router = createBrowserRouter([
       { index: true, element: <Navigate to='menu' replace /> },
       { path: 'menu', element: <MenuPage />, handle: { title: 'Menu Management' } },
       { path: 'category-groups', element: <CategoryGroups />, handle: { title: 'Category Groups' } },
+      { path: 'categories', element: <CategoriesPage />, handle: { title: 'Categories' } },
+      { path: 'categories/:categoryId', element: <CategoryEditPage />, handle: { title: 'Edit Category' } },
       { path: 'upsell', element: <UpsellPage />, handle: { title: 'Upsell' } },
       { path: 'orders', element: <OrdersPage />, handle: { title: 'Orders' } },
       { path: 'tables', element: <TablesPage />, handle: { title: 'Tables' } },

@@ -8,13 +8,14 @@ import {
   SettingOutlined,
   QuestionCircleOutlined,
   MenuFoldOutlined,
-  GroupOutlined
+  GroupOutlined,
+  TagsOutlined
 } from '@ant-design/icons';
 import { useLocation, Link } from 'react-router-dom';
 
 const { Text } = Typography;
 
-export default function SidebarNav({
+export default function SidebarNav ({
   rid,
   collapsed,
   onToggle,
@@ -31,6 +32,7 @@ export default function SidebarNav({
   const items = [
     { key: `${base}/menu`, icon: <AppstoreOutlined />, label: <Link to={`${base}/menu`} state={navState}>Menu</Link> },
     { key: `${base}/category-groups`, icon: <GroupOutlined />, label: <Link to={`${base}/category-groups`} state={navState}>Category Groups</Link> },
+    { key: `${base}/categories`, icon: <TagsOutlined />, label: <Link to={`${base}/categories`} state={navState}>Categories</Link> },
     { key: `${base}/upsell`, icon: <RiseOutlined />, label: <Link to={`${base}/upsell`} state={navState}>Upsell</Link> },
     { key: `${base}/orders`, icon: <ShoppingCartOutlined />, label: <Link to={`${base}/orders`} state={navState}>Orders</Link> },
     { key: `${base}/tables`, icon: <TableOutlined />, label: <Link to={`${base}/tables`} state={navState}>Tables</Link> },
