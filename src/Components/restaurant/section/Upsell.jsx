@@ -116,6 +116,22 @@ export default function UpsellPage () {
     });
   }, [items, search]);
 
+  const groupedItems = useMemo(() => {
+    const groups = filteredItems.reduce((acc, it) => {
+      const cat = (it.category || '').trim() || 'Uncategorized';
+      if (!acc[cat]) acc[cat] = [];
+      acc[cat].push(it);
+      return acc;
+    }, {});
+
+    return Object.entries(groups)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([category, list]) => ({
+        category,
+        items: list.slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+      }));
+  }, [filteredItems]);
+
   const selectedItem = items.find((it) => it._id === selectedId) || filteredItems[0] || null;
   const selectedCombos = draftCombos[selectedItem?._id] || [];
   const baseForSelected = baseCombos[selectedItem?._id] || [];
@@ -230,30 +246,37 @@ export default function UpsellPage () {
               style={{ borderRadius: 10, position: 'sticky', top: 76 }}
             >
               <Space direction='vertical' style={{ width: '100%' }}>
-                {filteredItems.map((it) => {
-                  const isActive = selectedItem?._id === it._id;
-                  return (
-                    <Button
-                      key={it._id}
-                      type={isActive ? 'primary' : 'default'}
-                      block
-                      style={{ textAlign: 'left', display: 'block', overflow: 'hidden' }}
-                      onClick={() => setSelectedId(it._id)}
-                    >
-                      <div
-                        style={{
-                          display: 'block',
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis'
-                        }}
-                        title={it.name || 'Untitled item'}
-                      >
-                        {it.name || 'Untitled item'}
-                      </div>
-                    </Button>
-                  );
-                })}
+                {groupedItems.map(({ category, items: list }) => (
+                  <div key={category}>
+                    <Text strong>{category}</Text>
+                    <Space direction='vertical' style={{ width: '100%', paddingLeft: 8 }}>
+                      {list.map((it) => {
+                        const isActive = selectedItem?._id === it._id;
+                        return (
+                          <Button
+                            key={it._id}
+                            type={isActive ? 'primary' : 'default'}
+                            block
+                            style={{ textAlign: 'left', display: 'block', overflow: 'hidden' }}
+                            onClick={() => setSelectedId(it._id)}
+                          >
+                            <div
+                              style={{
+                                display: 'block',
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis'
+                              }}
+                              title={it.name || 'Untitled item'}
+                            >
+                              {it.name || 'Untitled item'}
+                            </div>
+                          </Button>
+                        );
+                      })}
+                    </Space>
+                  </div>
+                ))}
               </Space>
             </Card>
           </Col>
@@ -288,58 +311,75 @@ export default function UpsellPage () {
                   )}
 
                   <Space direction='vertical' style={{ width: '100%' }} size={10}>
-                    {selectedCombos.map((combo, idx) => (
-                      <Card
-                        key={idx}
-                        size='small'
-                        style={{ borderRadius: 8, background: '#fafafa' }}
-                        styles={{ body: { padding: 12 } }}
-                      >
-                        <Row gutter={8} align='middle'>
+                    {selectedCombos.length > 0 && (
+                      <>
+                        <Row gutter={8} style={{ padding: '0 4px' }}>
                           <Col xs={24} md={10}>
-                            <Select
-                              showSearch
-                              placeholder='Select combo item'
-                              value={combo.id || undefined}
-                              onChange={(val) => updateComboAt(idx, { id: val })}
-                              style={{ width: '100%' }}
-                              options={menuOptions.filter((opt) => opt.value !== selectedItem._id)}
-                              optionFilterProp='label'
-                              filterOption={(input, option) => {
-                                const haystack = `${option?.label ?? ''} ${option?.category ?? ''}`.toLowerCase();
-                                return haystack.includes(input.toLowerCase());
-                              }}
-                              styles={{ popup: { maxHeight: 280, overflow: 'auto' } }}
-                            />
+                            <Text type='secondary' style={{ fontSize: 12 }}>Select combo item</Text>
                           </Col>
                           <Col xs={8} md={4}>
-                            <InputNumber
-                              min={1}
-                              value={combo.quantity}
-                              style={{ width: '100%' }}
-                              onChange={(val) => updateComboAt(idx, { quantity: Number(val) || 1 })}
-                              placeholder='Qty'
-                            />
+                            <Text type='secondary' style={{ fontSize: 12 }}>Quantity</Text>
                           </Col>
                           <Col xs={8} md={4}>
-                            <InputNumber
-                              min={0}
-                              value={combo.smartDineRank}
-                              style={{ width: '100%' }}
-                              onChange={(val) => updateComboAt(idx, { smartDineRank: val })}
-                              placeholder='Pref/Rank'
-                            />
+                            <Text type='secondary' style={{ fontSize: 12 }}>Rank</Text>
                           </Col>
-                          <Col xs={24} md={2} style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                            <Button
-                              danger
-                              icon={<DeleteOutlined />}
-                              onClick={() => removeComboAt(idx)}
-                            />
-                          </Col>
+                          <Col xs={24} md={2} />
                         </Row>
-                      </Card>
-                    ))}
+
+                        {selectedCombos.map((combo, idx) => (
+                          <Card
+                            key={idx}
+                            size='small'
+                            style={{ borderRadius: 8, background: '#fafafa' }}
+                            styles={{ body: { padding: 12 } }}
+                          >
+                            <Row gutter={8} align='middle'>
+                              <Col xs={24} md={10}>
+                                <Select
+                                  showSearch
+                                  placeholder='Select combo item'
+                                  value={combo.id || undefined}
+                                  onChange={(val) => updateComboAt(idx, { id: val })}
+                                  style={{ width: '100%' }}
+                                  options={menuOptions.filter((opt) => opt.value !== selectedItem._id)}
+                                  optionFilterProp='label'
+                                  filterOption={(input, option) => {
+                                    const haystack = `${option?.label ?? ''} ${option?.category ?? ''}`.toLowerCase();
+                                    return haystack.includes(input.toLowerCase());
+                                  }}
+                                  styles={{ popup: { maxHeight: 280, overflow: 'auto' } }}
+                                />
+                              </Col>
+                              <Col xs={8} md={4}>
+                                <InputNumber
+                                  min={1}
+                                  value={combo.quantity}
+                                  style={{ width: '100%' }}
+                                  onChange={(val) => updateComboAt(idx, { quantity: Number(val) || 1 })}
+                                  placeholder='Qty'
+                                />
+                              </Col>
+                              <Col xs={8} md={4}>
+                                <InputNumber
+                                  min={0}
+                                  value={combo.smartDineRank}
+                                  style={{ width: '100%' }}
+                                  onChange={(val) => updateComboAt(idx, { smartDineRank: val })}
+                                  placeholder='Pref/Rank'
+                                />
+                              </Col>
+                              <Col xs={24} md={2} style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                <Button
+                                  danger
+                                  icon={<DeleteOutlined />}
+                                  onClick={() => removeComboAt(idx)}
+                                />
+                              </Col>
+                            </Row>
+                          </Card>
+                        ))}
+                      </>
+                    )}
                   </Space>
 
                   <Button icon={<PlusOutlined />} onClick={addComboRow} style={{ width: '100%' }}>
