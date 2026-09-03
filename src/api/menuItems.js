@@ -92,44 +92,30 @@ const normalizeItem = (x = {}) => {
   };
 };
 
-// single page fetch (used internally)
-async function getMenuItemsByRestaurantPaged (restaurantId, params = {}) {
-  const res = await api.get(`/restaurants/${restaurantId}/menu-items`, { params });
-  const d = res.data?.data || {};
-  const items = (d.menuItems || d.items || []).map(normalizeItem);
-  const pagination = d.pagination || {
-    totalItems: items.length,
-    totalPages: 1,
-    currentPage: Number(params.page || 1),
-    pageSize: Number(params.limit || items.length || 20),
-    nextPage: null,
-    prevPage: null
-  };
-  return { items, pagination };
-}
-
-// public: fetch ALL items (auto-paginates until done)
+// Fetch all menu items for a restaurant (endpoint returns all items without pagination)
 export async function getAllMenuItemsByRestaurant (restaurantId, params = {}) {
-  const limit = Math.max(1, Number(params.limit || 100)); // 100 works with your backend cap
-  let page = 1;
-
-  const out = [];
-  let totalPages = 1;
-
-  // first page
-  const { items, pagination } = await getMenuItemsByRestaurantPaged(restaurantId, { ...params, page, limit });
-  out.push(...items);
-  totalPages = Number(pagination.totalPages || 1);
-
-  // remaining pages (if any)
-  while (page < totalPages) {
-    page += 1;
-    const r = await getMenuItemsByRestaurantPaged(restaurantId, { ...params, page, limit });
-    out.push(...r.items);
-  }
-
-  // return a flat list (admin wants everything in one page)
-  return { items: out, pagination: { totalItems: out.length, totalPages: 1, currentPage: 1, pageSize: out.length } };
+  const res = await api.get(`/restaurants/${restaurantId}/menu-items`, { params });
+  const data = res.data;
+  const rawList =
+    (Array.isArray(data) && data) ||
+    (data && Array.isArray(data.data) && data.data) ||
+    (data?.data && Array.isArray(data.data.menuItems) && data.data.menuItems) ||
+    (data?.data && Array.isArray(data.data.items) && data.data.items) ||
+    (data && Array.isArray(data.menuItems) && data.menuItems) ||
+    (data && Array.isArray(data.items) && data.items) ||
+    [];
+  const items = rawList.map(normalizeItem);
+  return {
+    items,
+    pagination: {
+      totalItems: items.length,
+      totalPages: 1,
+      currentPage: 1,
+      pageSize: items.length,
+      nextPage: null,
+      prevPage: null
+    }
+  };
 }
 
 export async function updateMenuItem (restaurantId, itemId, payload) {

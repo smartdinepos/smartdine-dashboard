@@ -76,7 +76,8 @@ async function uploadFileWithVariants ({
   }
 
   const url = `${API_BASE_URL}/restaurants/${restaurantId}/menu-items/${menuItemId}/images`;
-  const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+  const authToken = token || import.meta.env.ACCESS_TOKEN;
+  const headers = authToken ? { Authorization: `Bearer ${authToken}` } : undefined;
 
   const res = await fetch(url, { method: 'POST', headers, body: form });
   if (!res.ok) {
