@@ -1,7 +1,7 @@
 // hooks/useMenuItems.js
 import { useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getAllMenuItemsByRestaurant, updateMenuItem } from '../api/menuItems';
+import { getAllMenuItemsByRestaurant, updateMenuItem, uploadMenuItemVideos } from '../api/menuItems';
 
 const normalizeId = (value) => (value === undefined || value === null ? '' : String(value));
 
@@ -36,7 +36,17 @@ export function useUpdateMenuItem (restaurantId) {
       await qc.cancelQueries({ queryKey: baseKey });
       const previous = qc.getQueriesData({ queryKey: baseKey });
 
-      if (data && (data.description != null || data.name != null || data.comboItems != null || data.combos != null || data.categoryId != null || data.category != null)) {
+      if (data && (
+        data.description != null ||
+        data.name != null ||
+        data.comboItems != null ||
+        data.combos != null ||
+        data.categoryId != null ||
+        data.category != null ||
+        data.images != null ||
+        data.videos != null ||
+        data.isRestaurantRecommended != null
+      )) {
         qc.setQueriesData({ queryKey: baseKey }, (old) => {
           if (!old?.items) return old;
           const comboItems =
@@ -85,3 +95,28 @@ export function useUpdateMenuItem (restaurantId) {
     }
   });
 }
+
+export function useUploadMenuItemVideos (restaurantId) {
+  const qc = useQueryClient();
+  const baseKey = useMemo(() => ['menu-items-all', restaurantId], [restaurantId]);
+
+  return useMutation({
+    mutationFn: ({ itemId, formData }) => uploadMenuItemVideos(restaurantId, itemId, formData),
+
+    onSuccess (updated) {
+      if (!updated?._id) return;
+      qc.setQueriesData({ queryKey: baseKey }, (old) => {
+        if (!old?.items) return old;
+        return {
+          ...old,
+          items: old.items.map(it => (normalizeId(it._id) === normalizeId(updated._id) ? { ...it, ...updated } : it))
+        };
+      });
+    },
+
+    onSettled () {
+      qc.invalidateQueries({ queryKey: baseKey });
+    }
+  });
+}
+

@@ -6,10 +6,13 @@ import {
 import { EditOutlined } from '@ant-design/icons';
 import { useParams } from 'react-router-dom';
 import { useMenuItems, useUpdateMenuItem } from '../../../hooks/useMenuItems';
+import { useCategories } from '../../../hooks/useCategories';
 import MenuItemEditModal from './MenuItemEditModal';
 import { getPrimaryMenuUrl } from '../../../utils/images';
 
 const { Title, Text, Paragraph } = Typography;
+
+const normalizeId = (val) => (val === undefined || val === null ? '' : String(val).trim());
 
 function TagPill({ text }) {
   const raw = String(text || '');
@@ -30,13 +33,25 @@ function PromotedTag() {
   );
 }
 
-// Helper: group items by POS category label
-function groupByCategory(items = []) {
+// Helper: group items strictly by item.categoryId, resolving category name from categories
+function groupByCategory(items = [], categoryMap = new Map()) {
   const map = new Map();
   for (const it of items) {
-    const label = it.category || 'Uncategorized';
-    if (!map.has(label)) map.set(label, []);
-    map.get(label).push(it);
+    const catId = normalizeId(it.categoryId);
+    const cat = catId ? categoryMap.get(catId) : null;
+    const label = cat?.name || (catId ? 'Unknown Category' : 'Uncategorized');
+    const groupKey = catId || '__uncategorized__';
+
+    if (!map.has(groupKey)) {
+      const order = cat?.displayOrder ?? cat?.display_order ?? cat?.order ?? cat?.sortOrder ?? null;
+      map.set(groupKey, {
+        categoryId: catId,
+        categoryName: label,
+        displayOrder: order == null ? (catId ? 100000 : Number.POSITIVE_INFINITY) : Number(order),
+        items: []
+      });
+    }
+    map.get(groupKey).items.push(it);
   }
   return map;
 }
@@ -44,13 +59,25 @@ function groupByCategory(items = []) {
 export default function MenuPage() {
   const { rid } = useParams();
 
-  // fetch ALL items (no pagination UI)
+  // fetch ALL items (no pagination UI) and categories
   const { data, isLoading, isError, error, refetch, isFetching } = useMenuItems(rid);
+  const { data: categories = [], isLoading: isCategoriesLoading } = useCategories(rid);
   const { mutateAsync: saveItem, isPending: saving } = useUpdateMenuItem(rid);
 
   const [editing, setEditing] = useState(null);
 
   const items = data?.items ?? [];
+
+  const categoryMap = useMemo(() => {
+    const map = new Map();
+    (categories || []).forEach((cat) => {
+      const id = normalizeId(cat._id || cat.id);
+      if (id) {
+        map.set(id, cat);
+      }
+    });
+    return map;
+  }, [categories]);
 
   // Sort by displayOrder then by name (like POS)
   const sorted = useMemo(() => {
@@ -63,21 +90,23 @@ export default function MenuPage() {
     });
   }, [items]);
 
-  // Build Collapse panels from category groups
+  // Build Collapse panels from category groups (grouped strictly by item.categoryId)
   const collapseItems = useMemo(() => {
-    const groups = groupByCategory(sorted);
+    const groups = groupByCategory(sorted, categoryMap);
     const panels = [];
-    for (const [label, list] of groups.entries()) {
+    for (const [key, group] of groups.entries()) {
       panels.push({
-        key: label,
+        key,
+        displayOrder: group.displayOrder,
+        categoryName: group.categoryName,
         label: (
           <div className='menu-cat-header'>
-            <span className='menu-cat-title'>{label}</span>
+            <span className='menu-cat-title'>{group.categoryName}</span>
           </div>
         ),
         children: (
           <Space direction='vertical' size={16} style={{ width: '100%' }}>
-            {list.map((item) => {
+            {group.items.map((item) => {
               const thumb = getPrimaryMenuUrl(item.images);
               return (
                 <Card key={item._id} bodyStyle={{ padding: 16 }} style={{ borderRadius: 10 }}>
@@ -164,15 +193,20 @@ export default function MenuPage() {
         )
       });
     }
-    // Sort panels alphabetically by key (category label)
-    panels.sort((a, b) => String(b.key).localeCompare(String(a.key)));
+    // Sort panels by category displayOrder then category name
+    panels.sort((a, b) => {
+      const orderA = a.displayOrder ?? 100000;
+      const orderB = b.displayOrder ?? 100000;
+      if (orderA !== orderB) return orderA - orderB;
+      return String(a.categoryName || '').localeCompare(String(b.categoryName || ''));
+    });
     return panels;
-  }, [sorted]);
+  }, [sorted, categoryMap]);
 
   return (
     <div style={{ paddingRight: 8 }}>
       {/* Loading */}
-      {isLoading && (
+      {(isLoading || isCategoriesLoading) && (
         <div style={{ padding: 12 }}>
           <Skeleton active paragraph={{ rows: 2 }} />
           <Skeleton active paragraph={{ rows: 2 }} />
@@ -181,7 +215,7 @@ export default function MenuPage() {
       )}
 
       {/* Error */}
-      {!isLoading && isError && (
+      {!isLoading && !isCategoriesLoading && isError && (
         <div style={{ padding: 16 }}>
           <Title level={4}>Failed to load menu</Title>
           <Text type='danger'>{error?.message || 'Unknown error'}</Text>
@@ -192,7 +226,7 @@ export default function MenuPage() {
       )}
 
       {/* Content */}
-      {!isLoading && !isError && (
+      {!isLoading && !isCategoriesLoading && !isError && (
         <>
           {items.length === 0
             ? <Empty description='No menu items yet' />
@@ -202,7 +236,7 @@ export default function MenuPage() {
                 bordered={false}
                 items={collapseItems}
                 expandIconPosition='start'
-                defaultActiveKey={collapseItems.slice(0, 1).map(i => i.key)}
+                defaultActiveKey={collapseItems.map(i => i.key)}
                 style={{ background: 'transparent' }}
               />
             )
@@ -210,10 +244,18 @@ export default function MenuPage() {
 
           <MenuItemEditModal
             open={!!editing}
-            item={{ ...editing, restaurantId: rid }}
-            categoryItems={items.filter(i => i.category === editing?.category)}
+            item={{
+              ...editing,
+              category: categoryMap.get(normalizeId(editing?.categoryId))?.name || editing?.category || '',
+              restaurantId: rid
+            }}
+            categoryItems={items.filter(i => normalizeId(i.categoryId) === normalizeId(editing?.categoryId))}
             saving={saving}
             onCancel={() => setEditing(null)}
+            onItemUpdated={(updatedItem) => {
+              setEditing(prev => (prev ? { ...prev, ...updatedItem } : null));
+              refetch();
+            }}
             onSave={async (payload) => {
               try {
                 await saveItem({ itemId: editing._id, data: payload });
