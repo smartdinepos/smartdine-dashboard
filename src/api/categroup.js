@@ -7,12 +7,12 @@ export async function fetchCategoryGroups (restaurantId) {
 
 export async function createCategoryGroup (restaurantId, data) {
   const res = await api.post(`/restaurants/${restaurantId}/menu-category-groups`, data);
-  return res.data;
+  return res.data?.data?.categoryGroup || res.data?.categoryGroup || res.data;
 }
 
 export async function updateCategoryGroup (restaurantId, categoryGroupId, data) {
   const res = await api.patch(`/restaurants/${restaurantId}/menu-category-groups/${categoryGroupId}`, data);
-  return res.data;
+  return res.data?.data?.categoryGroup || res.data?.categoryGroup || res.data;
 }
 
 export async function deleteCategoryGroup (restaurantId, categoryGroupId) {

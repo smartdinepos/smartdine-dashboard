@@ -1,12 +1,40 @@
 import React, { memo, useState } from 'react';
-import { Card, Typography, Space, Row, Col, Skeleton, Empty, Button, message, Tag, Divider, Badge, Tooltip, Popconfirm } from 'antd';
-import { EditOutlined, ClusterOutlined, LinkOutlined, FireOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons';
+import {
+  Card,
+  Typography,
+  Space,
+  Row,
+  Col,
+  Skeleton,
+  Empty,
+  Button,
+  message,
+  Tag,
+  Divider,
+  Tooltip,
+  Popconfirm,
+  Modal
+} from 'antd';
+import {
+  EditOutlined,
+  ClusterOutlined,
+  LinkOutlined,
+  FireOutlined,
+  PlusOutlined,
+  DeleteOutlined,
+  ExclamationCircleOutlined
+} from '@ant-design/icons';
 import { useParams } from 'react-router-dom';
-import { useCategoryGroups, useCreateCategoryGroup, useUpdateCategoryGroup, useDeleteCategoryGroup } from '../../../hooks/useCategoryGroups';
+import {
+  useCategoryGroups,
+  useCreateCategoryGroup,
+  useUpdateCategoryGroup,
+  useDeleteCategoryGroup
+} from '../../../hooks/useCategoryGroups';
 import { useCategories, useUpdateCategory } from '../../../hooks/useCategories';
 import CategoryGroupEditModal from './CategoryGroupEditModal';
 
-const { Title, Text } = Typography;
+const { Title, Text, Paragraph } = Typography;
 
 const normalizeId = (value) => (value === undefined || value === null ? '' : String(value));
 const getGroupId = (group) =>
@@ -15,10 +43,26 @@ const getCategoryGroupId = (cat) =>
   cat?.categoryGroupId || cat?.categoryGroupID || cat?.categoryGroup?._id || cat?.categoryGroup?.id || null;
 const getCategoryId = (cat) => cat?._id || cat?.id;
 
+const TRIGGER_LABELS = {
+  ON_CATEGORY_GROUP_START: 'On Course Start',
+  WHILE_CATEGORY_GROUP_ACTIVE: 'While Course Active',
+  ON_CATEGORY_GROUP_END: 'On Course End'
+};
+
 function CategoryGroups () {
   const { rid } = useParams();
-  const { data: groups, isLoading: groupsLoading, isError: groupsError, error: groupsErrorObj, refetch: refetchGroups } = useCategoryGroups(rid);
-  const { data: categories, isLoading: categoriesLoading, refetch: refetchCategories } = useCategories(rid);
+  const {
+    data: groups,
+    isLoading: groupsLoading,
+    isError: groupsError,
+    error: groupsErrorObj,
+    refetch: refetchGroups
+  } = useCategoryGroups(rid);
+  const {
+    data: categories,
+    isLoading: categoriesLoading,
+    refetch: refetchCategories
+  } = useCategories(rid);
 
   const { mutateAsync: createGroup, isPending: creating } = useCreateCategoryGroup();
   const { mutateAsync: updateGroup, isPending: updating } = useUpdateCategoryGroup();
@@ -31,6 +75,12 @@ function CategoryGroups () {
 
   const triggerOrder = ['ON_CATEGORY_GROUP_START', 'WHILE_CATEGORY_GROUP_ACTIVE', 'ON_CATEGORY_GROUP_END'];
   const normalizeTrigger = (value = '') => value.toUpperCase();
+
+  const getGroupName = (id) => {
+    const g = groups?.find(item => normalizeId(getGroupId(item)) === normalizeId(id));
+    return g ? g.name : 'Unknown Group';
+  };
+
   const sortLinkedGroups = (links = []) => {
     return [...links].sort((a, b) => {
       const aIndex = triggerOrder.indexOf(normalizeTrigger(a.triggerEvent));
@@ -50,7 +100,6 @@ function CategoryGroups () {
         data: { categoryGroupId: nextGroupId }
       });
     } catch (error) {
-      // Some backends reject null; retry with empty string to clear the link
       if (nextGroupId === null && error?.response?.status === 400) {
         try {
           return await updateCategoryMutation({
@@ -59,7 +108,6 @@ function CategoryGroups () {
             data: { categoryGroupId: '' }
           });
         } catch (innerErr) {
-          // Last resort: attempt Mongo-style unset payloads some APIs accept
           if (innerErr?.response?.status === 400) {
             return updateCategoryMutation({
               restaurantId: rid,
@@ -75,7 +123,6 @@ function CategoryGroups () {
   };
 
   const updateCategoryAssignmentIfNeeded = async ({ catId, isSelected, currentlyAssigned, groupId }) => {
-    // Assign if selected and not already assigned; remove if unselected and currently assigned
     if (isSelected && !currentlyAssigned) {
       return updateCategoryGroupAssignment({
         catId,
@@ -98,19 +145,36 @@ function CategoryGroups () {
       const selectedIdSet = new Set(selectedCategoryIds.map(normalizeId));
       const normalizedGroupId = normalizeId(groupId);
 
+      const groupPayload = {
+        name: values.name,
+        isCurrentCategoryGroupEligible: values.isCurrentCategoryGroupEligible,
+        ...(values.maxItemsPerGuest !== undefined && { maxItemsPerGuest: values.maxItemsPerGuest }),
+        linkedCategoryGroups: values.linkedCategoryGroups || []
+      };
+
       if (isCreating || !groupId) {
-        await createGroup({
+        const createdGroup = await createGroup({
           restaurantId: rid,
-          data: values
+          data: groupPayload
         });
+
+        const newGroupId = getGroupId(createdGroup);
+
+        if (newGroupId && selectedCategoryIds.length > 0) {
+          const assignPromises = selectedCategoryIds.map((catId) =>
+            updateCategoryGroupAssignment({ catId, nextGroupId: newGroupId })
+          );
+          await Promise.all(assignPromises.filter(Boolean));
+          refetchCategories();
+        }
+
         message.success('Category group created successfully');
       } else {
         await updateGroup({
           restaurantId: rid,
           categoryGroupId: groupId,
-          data: values
+          data: groupPayload
         });
-        message.success('Category group updated successfully');
 
         const updatePromises = (categories || []).map(async (cat) => {
           const catId = getCategoryId(cat);
@@ -127,33 +191,52 @@ function CategoryGroups () {
         });
 
         await Promise.all(updatePromises.filter(Boolean));
-
         refetchCategories();
+        message.success('Category group updated successfully');
       }
 
       setEditingGroup(null);
       setIsCreating(false);
+      refetchGroups();
     } catch (err) {
       console.error(err);
-      message.error(err?.response?.data?.message || 'Failed to save category group');
+      const errorMsg =
+        err?.response?.data?.data?.message ||
+        err?.response?.data?.message ||
+        err?.message ||
+        'Failed to save category group';
+      message.error(errorMsg);
     }
-  };
-
-  const getGroupName = (id) => {
-    const g = groups?.find(item => normalizeId(getGroupId(item)) === normalizeId(id));
-    return g ? g.name : 'Unknown Group';
   };
 
   const handleDelete = async (group) => {
     const groupId = getGroupId(group);
     if (!groupId) return;
-    const assignedCount = (categories || []).filter(
+
+    const assignedCategories = (categories || []).filter(
       cat => normalizeId(getCategoryGroupId(cat)) === normalizeId(groupId)
-    ).length;
-    if (assignedCount > 0) {
-      message.warning('Remove categories from this category group before deleting.');
+    );
+
+    if (assignedCategories.length > 0) {
+      const catNames = assignedCategories.map(c => c.name).join(', ');
+      Modal.warning({
+        title: 'Cannot Delete Category Group',
+        icon: <ExclamationCircleOutlined style={{ color: '#faad14' }} />,
+        content: (
+          <Space direction='vertical' size={8}>
+            <Paragraph>
+              This category group has <strong>{assignedCategories.length}</strong> assigned categories ({catNames}).
+            </Paragraph>
+            <Paragraph type='secondary'>
+              Please edit the group or categories to unassign them before deleting.
+            </Paragraph>
+          </Space>
+        ),
+        okText: 'Understood'
+      });
       return;
     }
+
     try {
       setDeletingId(groupId);
       await deleteGroup({
@@ -161,72 +244,118 @@ function CategoryGroups () {
         categoryGroupId: groupId
       });
       message.success('Category group deleted successfully');
+      refetchGroups();
       refetchCategories();
     } catch (err) {
       console.error(err);
-      message.error(err?.response?.data?.message || 'Failed to delete category group');
+      const errorMsg =
+        err?.response?.data?.data?.message ||
+        err?.response?.data?.message ||
+        err?.message ||
+        'Failed to delete category group';
+      message.error(errorMsg);
     } finally {
       setDeletingId(null);
     }
   };
 
-  const containerStyle = {
-    // background: 'linear-gradient(135deg, #10396b 0%, #1c578a 45%, #0f9b8e 100%)',
-    background: '#F5F7FA',
-    padding: 20,
-    borderRadius: 18,
-    border: '1px solid rgba(255,255,255,0.08)',
-    boxShadow: '0 14px 40px rgba(0,0,0,0.28)',
-    color: '#f5f7fb'
-  };
-
-  const cardStyle = {
-    border: 'none',
-    background: 'rgba(255,255,255,0.94)',
-    boxShadow: '0 12px 32px rgba(0,0,0,0.1)',
-    borderRadius: 14
-  };
-
   if (groupsLoading || categoriesLoading) {
     return (
-      <div style={{ padding: 12 }}>
-        <Skeleton active paragraph={{ rows: 2 }} />
-        <Skeleton active paragraph={{ rows: 2 }} />
+      <div style={{ padding: 24 }}>
+        <Skeleton active paragraph={{ rows: 3 }} />
+        <Skeleton active paragraph={{ rows: 3 }} style={{ marginTop: 24 }} />
       </div>
     );
   }
 
   if (groupsError) {
     return (
-      <div style={{ padding: 16 }}>
-        <Title level={4}>Failed to load category groups</Title>
-        <Text type='danger'>{groupsErrorObj?.message || 'Unknown error'}</Text>
-        <div style={{ marginTop: 12 }}>
-          <Button onClick={() => refetchGroups()}>Retry</Button>
-        </div>
+      <div style={{ padding: 24 }}>
+        <Card>
+          <Title level={4}>Failed to load category groups</Title>
+          <Text type='danger'>{groupsErrorObj?.message || 'Unknown error occurred while fetching category groups.'}</Text>
+          <div style={{ marginTop: 16 }}>
+            <Button type='primary' onClick={() => refetchGroups()}>Retry</Button>
+          </div>
+        </Card>
       </div>
     );
   }
 
-  if (!groups || groups.length === 0) {
-    return <Empty description='No category groups available' />;
-  }
-
-  const sortedGroups = [...groups].sort((a, b) =>
+  const sortedGroups = [...(groups || [])].sort((a, b) =>
     (a?.name || '').localeCompare(b?.name || '', undefined, { sensitivity: 'base' })
   );
 
   return (
-    <>
-      <div style={containerStyle}>
-        <Row justify='start' align='middle' gutter={12} style={{ marginBottom: 12 }}>
-          <Col flex='none'>
-            <Space size={12} wrap>
-              <Badge color='#40a9ff' />
+    <div style={{ padding: '4px 0 24px 0' }}>
+      {/* Top Header */}
+      <Card
+        style={{
+          marginBottom: 16,
+          borderRadius: 12,
+          border: '1px solid #f0f0f0',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
+        }}
+        bodyStyle={{ padding: '16px 20px' }}
+      >
+        <Row justify='space-between' align='middle' gutter={[16, 16]}>
+          <Col>
+            <Space direction='vertical' size={2}>
+              <Space align='center' size={8}>
+                <ClusterOutlined style={{ fontSize: 20, color: '#1677ff' }} />
+                <Title level={4} style={{ margin: 0 }}>Category Groups</Title>
+                <Tag color='blue' style={{ borderRadius: 12, margin: 0, fontWeight: 600 }}>
+                  {sortedGroups.length}
+                </Tag>
+              </Space>
+              <Text type='secondary' style={{ fontSize: 13 }}>
+                Organize menu courses, guest order limits, and automated transitions across meal stages.
+              </Text>
+            </Space>
+          </Col>
+          <Col>
+            <Button
+              type='primary'
+              icon={<PlusOutlined />}
+              loading={creating}
+              onClick={() => {
+                setIsCreating(true);
+                setEditingGroup({});
+              }}
+            >
+              Add Category Group
+            </Button>
+          </Col>
+        </Row>
+      </Card>
+
+      {/* Main Content: List or Empty */}
+      {sortedGroups.length === 0
+        ? (
+          <Card
+            style={{
+              borderRadius: 12,
+              textAlign: 'center',
+              padding: '48px 24px',
+              border: '1px dashed #d9d9d9',
+              background: '#fafafa'
+            }}
+          >
+            <Empty
+              description={(
+                <Space direction='vertical' size={6}>
+                  <Text strong style={{ fontSize: 16 }}>No category groups configured</Text>
+                  <Text type='secondary'>
+                    Category groups let you pace orders (e.g. Starters → Main Course → Desserts) and set per-guest limits.
+                  </Text>
+                </Space>
+              )}
+            >
               <Button
                 type='primary'
                 icon={<PlusOutlined />}
-                loading={creating}
+                size='large'
+                style={{ marginTop: 12 }}
                 onClick={() => {
                   setIsCreating(true);
                   setEditingGroup({});
@@ -234,130 +363,160 @@ function CategoryGroups () {
               >
                 Create Category Group
               </Button>
-            </Space>
-          </Col>
-        </Row>
+            </Empty>
+          </Card>
+          )
+        : (
+          <Space direction='vertical' size={16} style={{ width: '100%' }}>
+            {sortedGroups.map((group) => {
+              const groupId = getGroupId(group);
+              const eligible = group.isCurrentCategoryGroupEligible;
+              const maxItems = group.maxItemsPerGuest != null ? group.maxItemsPerGuest : 'Unlimited';
+              const sortedLinkedGroups = sortLinkedGroups(group.linkedCategoryGroups);
 
-        <Space direction='vertical' size={12} style={{ width: '100%' }}>
-          {sortedGroups.map((group) => {
-            const groupId = getGroupId(group);
-            const eligible = group.isCurrentCategoryGroupEligible;
-            const maxItems = group.maxItemsPerGuest ?? 'Unlimited';
-            const sortedLinkedGroups = sortLinkedGroups(group.linkedCategoryGroups);
+              // Filter categories that belong to this group
+              const groupCategories = (categories || []).filter(cat =>
+                normalizeId(getCategoryGroupId(cat)) === normalizeId(groupId)
+              );
 
-            // Filter categories that belong to this group
-            const groupCategories = (categories || []).filter(cat =>
-              normalizeId(getCategoryGroupId(cat)) === normalizeId(groupId)
-            );
-
-            return (
-              <Card
-                key={groupId}
-                style={cardStyle}
-                bodyStyle={{ padding: 16 }}
-                title={
-                  <Space direction='vertical' size={4} style={{ width: '100%' }}>
-                    <Tag color='default' style={{ marginTop: 4, fontSize: '11px', width: 'fit-content' }}>
-                      ID: {groupId}
-                    </Tag>
-                    <Space size={8} wrap align='center'>
-                      <ClusterOutlined style={{ color: '#1677ff' }} />
-                      <Text strong style={{ fontSize: 16 }}>{group.name}</Text>
-                      <Divider type='vertical' style={{ margin: '0 8px', height: '1.2em', top: 0 }} />
-                      <Tag color={eligible ? 'success' : 'volcano'} style={{ margin: 0 }}>
-                        {eligible ? 'Eligible as Current Group' : 'Not Eligible as Current Group'}
-                      </Tag>
-                      <Tag color='blue' style={{ margin: 0 }}>
-                        Max Items per Guest: {maxItems}
-                      </Tag>
-                    </Space>
-                  </Space>
-                }
-                extra={
-                  <Space>
-                    <Button
-                      type='primary'
-                      ghost
-                      icon={<EditOutlined />}
-                      onClick={() => setEditingGroup(group)}
-                    >
-                      Edit
-                    </Button>
-                    <Popconfirm
-                      title='Delete category group?'
-                      description='Are you sure you want to delete this group?'
-                      okText='Yes, delete'
-                      cancelText='Cancel'
-                      okButtonProps={{ loading: deleting && deletingId === groupId }}
-                      onConfirm={() => handleDelete(group)}
-                      disabled={deletingId === groupId}
-                    >
-                      <Button
-                        danger
-                        type='text'
-                        icon={<DeleteOutlined />}
-                        loading={deleting && deletingId === groupId}
-                      />
-                    </Popconfirm>
-                  </Space>
-                }
-              >
-                <Row gutter={[12, 12]} align='middle'>
-                  <Col span={24}>
-                    {groupCategories.length > 0 && (
-                      <div style={{ marginBottom: 12 }}>
-                        <Space wrap>
-                          <Tag color='purple' style={{ margin: 0 }}>
-                            Categories
+              return (
+                <Card
+                  key={groupId}
+                  style={{
+                    borderRadius: 12,
+                    border: '1px solid #e8e8e8',
+                    boxShadow: '0 2px 10px rgba(0,0,0,0.03)'
+                  }}
+                  bodyStyle={{ padding: 18 }}
+                  title={
+                    <Row align='middle' justify='space-between' wrap orientation='horizontal' style={{ width: '100%' }}>
+                      <Col>
+                        <Space size={10} wrap align='center'>
+                          <ClusterOutlined style={{ color: '#1677ff', fontSize: 17 }} />
+                          <Text strong style={{ fontSize: 16 }}>{group.name}</Text>
+                          <Tag color='default' style={{ fontSize: '11px', margin: 0 }}>
+                            ID: {groupId}
                           </Tag>
-                          {groupCategories.map((cat) => (
-                            <Tag key={cat._id || cat.id} color='cyan' style={{ margin: 0 }}>
-                              {cat.name}
-                            </Tag>
-                          ))}
+                          <Divider type='vertical' style={{ margin: '0 4px' }} />
+                          <Tag color={eligible ? 'success' : 'default'} style={{ margin: 0 }}>
+                            {eligible ? 'Eligible as Current Course' : 'Not Eligible as Current Course'}
+                          </Tag>
+                          <Tag color='geekblue' style={{ margin: 0 }}>
+                            Max Items / Guest: {maxItems}
+                          </Tag>
                         </Space>
-                      </div>
-                    )}
-
-                    <Space wrap>
-                      <Tooltip title='Automated triggers to other groups'>
-                        <Tag icon={<LinkOutlined />} color={sortedLinkedGroups?.length ? 'geekblue' : 'default'} style={{ margin: 0 }}>
-                          {sortedLinkedGroups?.length ? 'Linked Groups' : 'No Linked Groups'}
-                        </Tag>
-                      </Tooltip>
-                      {sortedLinkedGroups?.length
-                        ? (
-                            sortedLinkedGroups.map((link, idx) => {
-                              const maxPromo = link.maxPromotions != null && link.maxPromotions !== ''
-                                ? link.maxPromotions
-                                : 'Unlimited';
-                              return (
-                                <Tag
-                                  key={`${groupId}-${idx}`}
-                                  color='processing'
-                                  style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 4 }}
-                                >
-                                  <FireOutlined style={{ color: '#fa8c16' }} />
-                                  <span style={{ fontWeight: 600 }}>{link.triggerEvent.replace(/_/g, ' ')}</span>
-                                  <span style={{ opacity: 0.8 }}>→ {getGroupName(link.targetCategoryGroupId)} ({maxPromo})</span>
-                                </Tag>
-                              );
-                            })
-                          )
-                        : null}
+                      </Col>
+                    </Row>
+                  }
+                  extra={
+                    <Space size={8}>
+                      <Button
+                        type='primary'
+                        ghost
+                        size='small'
+                        icon={<EditOutlined />}
+                        onClick={() => {
+                          setIsCreating(false);
+                          setEditingGroup(group);
+                        }}
+                      >
+                        Edit
+                      </Button>
+                      <Popconfirm
+                        title='Delete Category Group'
+                        description={`Are you sure you want to delete "${group.name}"?`}
+                        okText='Yes, Delete'
+                        cancelText='Cancel'
+                        okButtonProps={{ danger: true, loading: deleting && deletingId === groupId }}
+                        onConfirm={() => handleDelete(group)}
+                        disabled={deleting && deletingId === groupId}
+                      >
+                        <Button
+                          danger
+                          type='text'
+                          size='small'
+                          icon={<DeleteOutlined />}
+                          loading={deleting && deletingId === groupId}
+                        />
+                      </Popconfirm>
                     </Space>
-                  </Col>
-                </Row>
-              </Card>
-            );
-          })}
-        </Space>
-      </div>
+                  }
+                >
+                  <Space direction='vertical' size={12} style={{ width: '100%' }}>
+                    {/* Assigned Categories */}
+                    <div>
+                      <Space wrap align='center'>
+                        <Text strong style={{ fontSize: 13, color: '#595959' }}>Assigned Categories:</Text>
+                        {groupCategories.length > 0
+                          ? (
+                              groupCategories.map((cat) => (
+                                <Tag key={cat._id || cat.id} color='cyan' style={{ margin: 0 }}>
+                                  {cat.name}
+                                </Tag>
+                              ))
+                            )
+                          : (
+                            <Text type='secondary' orientation='left' style={{ fontSize: 12 }}>
+                              None assigned (click Edit to assign categories)
+                            </Text>
+                            )}
+                      </Space>
+                    </div>
 
+                    {/* Linked Category Groups / Triggers */}
+                    <div>
+                      <Space wrap align='center'>
+                        <Tooltip title='Automated transitions to other category groups based on session dining events'>
+                          <Tag
+                            icon={<LinkOutlined />}
+                            color={sortedLinkedGroups?.length ? 'purple' : 'default'}
+                            style={{ margin: 0 }}
+                          >
+                            {sortedLinkedGroups?.length
+                              ? `Linked Transitions (${sortedLinkedGroups.length})`
+                              : 'No Linked Transitions'}
+                          </Tag>
+                        </Tooltip>
+
+                        {sortedLinkedGroups?.length > 0 &&
+                          sortedLinkedGroups.map((link, idx) => {
+                            const maxPromo = link.maxPromotions != null && link.maxPromotions !== ''
+                              ? link.maxPromotions
+                              : 'Unlimited';
+                            const eventLabel = TRIGGER_LABELS[link.triggerEvent] || link.triggerEvent.replace(/_/g, ' ');
+                            return (
+                              <Tag
+                                key={`${groupId}-link-${idx}`}
+                                color='processing'
+                                style={{
+                                  margin: 0,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 5,
+                                  padding: '2px 8px'
+                                }}
+                              >
+                                <FireOutlined style={{ color: '#fa8c16' }} />
+                                <span style={{ fontWeight: 600 }}>{eventLabel}</span>
+                                <span style={{ opacity: 0.85 }}>→ {getGroupName(link.targetCategoryGroupId)}</span>
+                                <span style={{ fontSize: 11, color: '#8c8c8c' }}>({maxPromo} promo)</span>
+                              </Tag>
+                            );
+                          })}
+                      </Space>
+                    </div>
+                  </Space>
+                </Card>
+              );
+            })}
+          </Space>
+          )}
+
+      {/* Add / Edit Category Group Modal */}
       <CategoryGroupEditModal
         open={!!editingGroup}
         group={editingGroup}
-        allGroups={groups}
+        allGroups={groups || []}
         isCreating={isCreating}
         saving={updating || creating}
         onCancel={() => {
@@ -366,7 +525,7 @@ function CategoryGroups () {
         }}
         onSave={handleSave}
       />
-    </>
+    </div>
   );
 }
 
