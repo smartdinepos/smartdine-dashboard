@@ -530,17 +530,51 @@ export default function CategoriesPage () {
                           onChange={setMoveTargetId}
                           style={{ width: '100%' }}
                         >
-                          {sortedCategories
-                            .filter(cat => {
-                              const isSame = normalizeId(cat._id || cat.id) === normalizeId(selectedCategory?._id || selectedCategory?.id);
-                              const isParent = (cat?.type || '').toLowerCase() === 'parent';
-                              return !isSame && !isParent;
-                            })
-                            .map(cat => (
-                              <Option key={cat._id || cat.id} value={cat._id || cat.id}>
-                                {cat.name}
-                              </Option>
-                            ))}
+                          {hasParentCategories ? (
+                            <>
+                              {parentCategories.map((parentCat) => {
+                                const parentId = normalizeId(getCategoryId(parentCat));
+                                const childList = (childrenByParent.get(parentId) || []).filter(
+                                  cat => normalizeId(getCategoryId(cat)) !== normalizeId(getCategoryId(selectedCategory))
+                                );
+                                if (childList.length === 0) return null;
+                                return (
+                                  <Select.OptGroup key={parentId} label={parentCat.name || 'Untitled Parent'}>
+                                    {childList.map(cat => (
+                                      <Option key={getCategoryId(cat)} value={getCategoryId(cat)}>
+                                        {cat.name}
+                                      </Option>
+                                    ))}
+                                  </Select.OptGroup>
+                                );
+                              })}
+                              {ungroupedChildren.filter(
+                                cat => normalizeId(getCategoryId(cat)) !== normalizeId(getCategoryId(selectedCategory))
+                              ).length > 0 && (
+                                <Select.OptGroup label='Other Categories'>
+                                  {ungroupedChildren
+                                    .filter(cat => normalizeId(getCategoryId(cat)) !== normalizeId(getCategoryId(selectedCategory)))
+                                    .map(cat => (
+                                      <Option key={getCategoryId(cat)} value={getCategoryId(cat)}>
+                                        {cat.name}
+                                      </Option>
+                                    ))}
+                                </Select.OptGroup>
+                              )}
+                            </>
+                          ) : (
+                            sortedCategories
+                              .filter(cat => {
+                                const isSame = normalizeId(cat._id || cat.id) === normalizeId(selectedCategory?._id || selectedCategory?.id);
+                                const isParent = (cat?.type || '').toLowerCase() === 'parent';
+                                return !isSame && !isParent;
+                              })
+                              .map(cat => (
+                                <Option key={cat._id || cat.id} value={cat._id || cat.id}>
+                                  {cat.name}
+                                </Option>
+                              ))
+                          )}
                         </Select>
                       </Form.Item>
                       <div

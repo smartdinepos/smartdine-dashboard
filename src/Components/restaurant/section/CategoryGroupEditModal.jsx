@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import {
   Modal,
   Form,
@@ -28,6 +28,8 @@ const TRIGGER_EVENT_OPTIONS = [
 
 const normalizeId = (value) => (value === undefined || value === null ? '' : String(value));
 
+const getCategoryId = (cat) => cat?._id || cat?.id;
+
 const getCategoryGroupId = (cat) => {
   if (!cat) return null;
   return (
@@ -44,6 +46,21 @@ const getGroupId = (g) => {
   return g._id || g.id || g.categoryGroupId || g.categoryGroupID || null;
 };
 
+const getParentCategoryId = (cat) => {
+  const directParent = cat?.parentCategoryId ?? cat?.parentCategoryID ?? cat?.parentId ?? cat?.parentID ?? null;
+  if (directParent) return normalizeId(directParent);
+  const parentObj = cat?.parentCategory || cat?.parent;
+  if (parentObj && typeof parentObj === 'object') {
+    return normalizeId(parentObj._id || parentObj.id);
+  }
+  if (typeof cat?.parentCategory === 'string') return normalizeId(cat.parentCategory);
+  return '';
+};
+
+const isParentCategory = (cat) => (cat?.type || '').toLowerCase() === 'parent';
+
+const displayOrderLabel = (cat) => (cat?.displayOrder ?? cat?.display_order ?? cat?.order ?? cat?.sortOrder ?? null);
+
 export default function CategoryGroupEditModal ({
   open,
   group,
@@ -57,15 +74,78 @@ export default function CategoryGroupEditModal ({
   const { rid } = useParams();
   const { data: categories } = useCategories(rid);
 
+  const sortedCategories = useMemo(() => {
+    if (!categories) return [];
+    const getOrder = (cat) => {
+      const order = displayOrderLabel(cat);
+      return order == null ? Number.POSITIVE_INFINITY : Number(order);
+    };
+    return [...categories].sort((a, b) => {
+      const orderDiff = getOrder(a) - getOrder(b);
+      if (orderDiff !== 0) return orderDiff;
+      return (a?.name || '').localeCompare(b?.name || '', undefined, { sensitivity: 'base' });
+    });
+  }, [categories]);
+
+  const referencedParentIds = useMemo(() => {
+    const ids = new Set();
+    sortedCategories.forEach((cat) => {
+      const parentId = getParentCategoryId(cat);
+      if (parentId) ids.add(parentId);
+    });
+    return ids;
+  }, [sortedCategories]);
+
+  const parentCategories = useMemo(
+    () => sortedCategories.filter((cat) => {
+      const catId = normalizeId(getCategoryId(cat));
+      return isParentCategory(cat) || referencedParentIds.has(catId);
+    }),
+    [sortedCategories, referencedParentIds]
+  );
+
+  const parentIdSet = useMemo(
+    () => new Set(parentCategories.map(cat => normalizeId(getCategoryId(cat)))),
+    [parentCategories]
+  );
+
+  const hasParentCategories = parentCategories.length > 0;
+
+  const childrenByParent = useMemo(() => {
+    const map = new Map();
+    sortedCategories.forEach((cat) => {
+      const parentId = getParentCategoryId(cat);
+      if (!parentId || !parentIdSet.has(parentId)) return;
+      if (isParentCategory(cat)) return;
+      if (!map.has(parentId)) map.set(parentId, []);
+      map.get(parentId).push(cat);
+    });
+    return map;
+  }, [sortedCategories, parentIdSet]);
+
+  const ungroupedChildren = useMemo(
+    () => sortedCategories.filter((cat) => {
+      if (isParentCategory(cat)) return false;
+      const parentId = getParentCategoryId(cat);
+      if (parentId && parentIdSet.has(parentId)) return false;
+      return true;
+    }),
+    [sortedCategories, parentIdSet]
+  );
+
   useEffect(() => {
     if (open) {
       if (group && !isCreating && getGroupId(group)) {
         const currentGroupId = normalizeId(getGroupId(group));
 
-        // Get category IDs that belong to this group
-        const groupCategoryIds = (categories || [])
-          .filter(cat => normalizeId(getCategoryGroupId(cat)) === currentGroupId)
-          .map(cat => cat._id || cat.id);
+        // Get child category IDs that belong to this group (exclude parent categories)
+        const groupCategoryIds = (sortedCategories || [])
+          .filter(cat => {
+            const isAssigned = normalizeId(getCategoryGroupId(cat)) === currentGroupId;
+            const isParent = isParentCategory(cat) || parentIdSet.has(normalizeId(getCategoryId(cat)));
+            return isAssigned && !isParent;
+          })
+          .map(cat => getCategoryId(cat));
 
         form.setFieldsValue({
           name: group.name,
@@ -85,7 +165,7 @@ export default function CategoryGroupEditModal ({
         });
       }
     }
-  }, [open, group, form, categories, isCreating]);
+  }, [open, group, form, sortedCategories, parentIdSet, isCreating]);
 
   const handleOk = async () => {
     try {
@@ -173,7 +253,6 @@ export default function CategoryGroupEditModal ({
             <Form.Item
               name='maxItemsPerGuest'
               label='Max Items Per Guest'
-              tooltip='Limit how many items a guest can order from this group during this course. Leave empty for unlimited.'
             >
               <InputNumber
                 min={0}
@@ -188,7 +267,6 @@ export default function CategoryGroupEditModal ({
           name='isCurrentCategoryGroupEligible'
           valuePropName='checked'
           label='Eligible for Current Group'
-          tooltip='Whether this group can be selected as the active dining course on guest devices.'
         >
           <Switch />
         </Form.Item>
@@ -196,45 +274,130 @@ export default function CategoryGroupEditModal ({
         <Form.Item
           name='categoryIds'
           label='Assign Categories'
-          tooltip='Select categories that belong to this group. Categories assigned here will be linked to this category group.'
         >
-          {(!categories || categories.length === 0)
+          {(!sortedCategories || sortedCategories.length === 0)
             ? (
               <Text type='secondary'>No menu categories available for this restaurant.</Text>
               )
             : (
               <Checkbox.Group style={{ width: '100%' }}>
-                <Row gutter={[8, 8]}>
-                  {categories.map((cat) => {
-                    const catId = cat._id || cat.id;
-                    const otherGroup = getAssignedGroupName(cat);
-                    return (
-                      <Col key={catId} xs={24} sm={12} md={8}>
-                        <Checkbox value={catId} style={{ display: 'flex', alignItems: 'center' }}>
-                          <Space size={4} wrap>
-                            <Tag color='cyan' style={{ margin: 0 }}>
-                              {cat.name}
+                {hasParentCategories ? (
+                  <Space direction='vertical' size={12} style={{ width: '100%' }}>
+                    {parentCategories.map((parentCat) => {
+                      const parentId = normalizeId(getCategoryId(parentCat));
+                      const childList = childrenByParent.get(parentId) || [];
+                      return (
+                        <div
+                          key={parentId || parentCat.name}
+                          style={{
+                            padding: '12px 16px',
+                            background: '#fafafa',
+                            borderRadius: 8,
+                            border: '1px solid #f0f0f0'
+                          }}
+                        >
+                          <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center' }}>
+                            <Tag color='blue' style={{ fontWeight: 600, fontSize: 13, margin: 0, padding: '2px 8px' }}>
+                              {parentCat.name || 'Untitled Parent'}
                             </Tag>
-                            {otherGroup && (
-                              <Tag color='default' style={{ margin: 0, fontSize: 10 }}>
-                                {otherGroup}
+                          </div>
+                          {childList.length > 0 && (
+                            <Row gutter={[8, 8]}>
+                              {childList.map((cat) => {
+                                const catId = getCategoryId(cat);
+                                const otherGroup = getAssignedGroupName(cat);
+                                return (
+                                  <Col key={catId} xs={24} sm={12} md={8}>
+                                    <Checkbox value={catId} style={{ display: 'flex', alignItems: 'center' }}>
+                                      <Space size={4} wrap>
+                                        <Tag color='cyan' style={{ margin: 0 }}>
+                                          {cat.name}
+                                        </Tag>
+                                        {otherGroup && (
+                                          <Tag color='default' style={{ margin: 0, fontSize: 10 }}>
+                                            {otherGroup}
+                                          </Tag>
+                                        )}
+                                      </Space>
+                                    </Checkbox>
+                                  </Col>
+                                );
+                              })}
+                            </Row>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {ungroupedChildren.length > 0 && (
+                      <div
+                        style={{
+                          padding: '12px 16px',
+                          background: '#fafafa',
+                          borderRadius: 8,
+                          border: '1px solid #f0f0f0'
+                        }}
+                      >
+                        <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center' }}>
+                          <Tag color='default' style={{ fontWeight: 600, fontSize: 13, margin: 0, padding: '2px 8px' }}>
+                            Other Categories
+                          </Tag>
+                        </div>
+                        <Row gutter={[8, 8]}>
+                          {ungroupedChildren.map((cat) => {
+                            const catId = getCategoryId(cat);
+                            const otherGroup = getAssignedGroupName(cat);
+                            return (
+                              <Col key={catId} xs={24} sm={12} md={8}>
+                                <Checkbox value={catId} style={{ display: 'flex', alignItems: 'center' }}>
+                                  <Space size={4} wrap>
+                                    <Tag color='cyan' style={{ margin: 0 }}>
+                                      {cat.name}
+                                    </Tag>
+                                    {otherGroup && (
+                                      <Tag color='default' style={{ margin: 0, fontSize: 10 }}>
+                                        {otherGroup}
+                                      </Tag>
+                                    )}
+                                  </Space>
+                                </Checkbox>
+                              </Col>
+                            );
+                          })}
+                        </Row>
+                      </div>
+                    )}
+                  </Space>
+                ) : (
+                  <Row gutter={[8, 8]}>
+                    {ungroupedChildren.map((cat) => {
+                      const catId = getCategoryId(cat);
+                      const otherGroup = getAssignedGroupName(cat);
+                      return (
+                        <Col key={catId} xs={24} sm={12} md={8}>
+                          <Checkbox value={catId} style={{ display: 'flex', alignItems: 'center' }}>
+                            <Space size={4} wrap>
+                              <Tag color='cyan' style={{ margin: 0 }}>
+                                {cat.name}
                               </Tag>
-                            )}
-                          </Space>
-                        </Checkbox>
-                      </Col>
-                    );
-                  })}
-                </Row>
+                              {otherGroup && (
+                                <Tag color='default' style={{ margin: 0, fontSize: 10 }}>
+                                  {otherGroup}
+                                </Tag>
+                              )}
+                            </Space>
+                          </Checkbox>
+                        </Col>
+                      );
+                    })}
+                  </Row>
+                )}
               </Checkbox.Group>
               )}
         </Form.Item>
 
         <div style={{ marginTop: 16, marginBottom: 12 }}>
           <Text strong>Linked Category Groups (Automated Triggers)</Text>
-          <Text type='secondary' style={{ display: 'block', fontSize: 13 }}>
-            Define automated course transition rules to trigger other category groups based on session events.
-          </Text>
         </div>
 
         <Form.List name='linkedCategoryGroups'>
